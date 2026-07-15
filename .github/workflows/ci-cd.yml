@@ -1,0 +1,103 @@
+name: Secure CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-1
+  ECR_REPOSITORY: fincorp-app
+  CODEARTIFACT_DOMAIN: fincorp-domain
+  CODEARTIFACT_REPOSITORY: fincorp-internal
+  IAM_ROLE_ARN: arn:aws:iam::976193229864:role/github-actions-fincorp-role
+
+jobs:
+  build-scan-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Authenticate npm against CodeArtifact (upstream proxy for npmjs)
+        working-directory: fincorp-app
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws codeartifact login \
+            --tool npm \
+            --domain "$CODEARTIFACT_DOMAIN" \
+            --domain-owner "$ACCOUNT_ID" \
+            --repository "$CODEARTIFACT_REPOSITORY" \
+            --region "$AWS_REGION"
+
+      - name: Install dependencies
+        working-directory: fincorp-app
+        run: npm ci
+
+      - name: Run tests
+        working-directory: fincorp-app
+        run: npm test
+
+      - name: Build Docker image
+        working-directory: fincorp-app
+        run: docker build -t "$ECR_REPOSITORY:${{ github.sha }}" .
+
+      # Gate: build fails here if any HIGH/CRITICAL vulnerability is found,
+      # before the image is ever pushed to ECR.
+      - name: Scan image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: false
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Tag and push immutable image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker tag "$ECR_REPOSITORY:${{ github.sha }}" "$ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}"
+
+      # Defense-in-depth + audit trail: ECR's own scan-on-push runs
+      # independently of the Trivy gate above. Record its findings as a
+      # build artifact for compliance/audit purposes.
+      - name: Record ECR native scan findings (audit trail)
+        run: |
+          aws ecr wait image-scan-complete \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-id imageTag=${{ github.sha }} \
+            --region "$AWS_REGION" || true
+          aws ecr describe-image-scan-findings \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-id imageTag=${{ github.sha }} \
+            --region "$AWS_REGION" \
+            --output json | tee ecr-scan-findings.json
+
+      - name: Upload scan findings artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecr-scan-findings-${{ github.sha }}
+          path: ecr-scan-findings.json
