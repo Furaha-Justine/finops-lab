@@ -59,8 +59,11 @@ jobs:
         working-directory: fincorp-app
         run: docker build -t "$ECR_REPOSITORY:${{ github.sha }}" .
 
-      # Gate: build fails here if any HIGH/CRITICAL vulnerability is found,
-      # before the image is ever pushed to ECR.
+      # Gate: build fails here if any HIGH/CRITICAL vulnerability with an
+      # available fix is found, before the image is ever pushed to ECR.
+      # ignore-unfixed=true excludes CVEs with no vendor patch yet (nothing
+      # we can remediate by rebuilding); those still show up in the ECR
+      # native scan findings artifact below for audit visibility.
       - name: Scan image for vulnerabilities (Trivy)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -68,7 +71,7 @@ jobs:
           format: table
           severity: HIGH,CRITICAL
           exit-code: "1"
-          ignore-unfixed: false
+          ignore-unfixed: true
 
       - name: Login to Amazon ECR
         id: ecr-login

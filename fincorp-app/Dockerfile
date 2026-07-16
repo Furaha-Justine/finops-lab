@@ -9,7 +9,9 @@ COPY src ./src
 FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-RUN groupadd -r fincorp && useradd -r -g fincorp -d /app fincorp \
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+    && groupadd -r fincorp && useradd -r -g fincorp -d /app fincorp \
     && chown -R fincorp:fincorp /app
 COPY --from=build --chown=fincorp:fincorp /app/node_modules ./node_modules
 COPY --from=build --chown=fincorp:fincorp /app/package*.json ./
