@@ -1,6 +1,17 @@
-output "github_actions_role_arn" {
-  description = "IAM role ARN GitHub Actions assumes via OIDC"
-  value       = aws_iam_role.github_actions_fincorp.arn
+output "jenkins_iam_user" {
+  description = "IAM user Jenkins authenticates as"
+  value       = aws_iam_user.jenkins_fincorp.name
+}
+
+output "jenkins_access_key_id" {
+  description = "Access key ID for the Jenkins IAM user"
+  value       = aws_iam_access_key.jenkins_fincorp.id
+}
+
+output "jenkins_secret_access_key" {
+  description = "Secret access key for the Jenkins IAM user (sensitive — retrieve with terraform output -raw jenkins_secret_access_key)"
+  value       = aws_iam_access_key.jenkins_fincorp.secret
+  sensitive   = true
 }
 
 output "aws_account_id" {

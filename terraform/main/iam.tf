@@ -1,47 +1,26 @@
 data "aws_caller_identity" "current" {}
 
 # ---------------------------------------------------------------------------
-# GitHub Actions OIDC identity provider
+# Jenkins CI identity
+#
+# Jenkins runs locally in Docker, not on GitHub or inside AWS, so there's no
+# platform-issued OIDC token to federate against (unlike GitHub Actions'
+# token.actions.githubusercontent.com). The pragmatic equivalent for a
+# self-hosted/local CI server is a dedicated IAM user scoped to the same
+# least-privilege permissions, with its access keys stored only in Jenkins'
+# encrypted credential store (never committed to the repo).
 # ---------------------------------------------------------------------------
 
-resource "aws_iam_openid_connect_provider" "github_actions" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [var.github_oidc_thumbprint]
-}
-
-data "aws_iam_policy_document" "github_actions_trust" {
-  statement {
-    sid     = "GitHubActionsOIDCTrust"
-    effect  = "Allow"
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-
-    principals {
-      type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github_actions.arn]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-
-    condition {
-      test     = "StringLike"
-      variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_org}/${var.github_repo}:*"]
-    }
-  }
-}
-
-resource "aws_iam_role" "github_actions_fincorp" {
-  name               = "github-actions-fincorp-role"
-  assume_role_policy = data.aws_iam_policy_document.github_actions_trust.json
+resource "aws_iam_user" "jenkins_fincorp" {
+  name = "jenkins-fincorp-ci"
 
   tags = {
     Project = "fincorp"
   }
+}
+
+resource "aws_iam_access_key" "jenkins_fincorp" {
+  user = aws_iam_user.jenkins_fincorp.name
 }
 
 # ---------------------------------------------------------------------------
@@ -75,7 +54,7 @@ data "aws_iam_policy_document" "ecr_access" {
 }
 
 resource "aws_iam_policy" "ecr_access" {
-  name   = "fincorp-github-actions-ecr"
+  name   = "fincorp-jenkins-ecr"
   policy = data.aws_iam_policy_document.ecr_access.json
 }
 
@@ -118,7 +97,7 @@ data "aws_iam_policy_document" "codeartifact_access" {
 }
 
 resource "aws_iam_policy" "codeartifact_access" {
-  name   = "fincorp-github-actions-codeartifact"
+  name   = "fincorp-jenkins-codeartifact"
   policy = data.aws_iam_policy_document.codeartifact_access.json
 }
 
@@ -136,22 +115,22 @@ data "aws_iam_policy_document" "rds_access" {
 }
 
 resource "aws_iam_policy" "rds_access" {
-  name   = "fincorp-github-actions-rds"
+  name   = "fincorp-jenkins-rds"
   policy = data.aws_iam_policy_document.rds_access.json
 }
 
-resource "aws_iam_role_policy_attachment" "ecr" {
-  role       = aws_iam_role.github_actions_fincorp.name
+resource "aws_iam_user_policy_attachment" "ecr" {
+  user       = aws_iam_user.jenkins_fincorp.name
   policy_arn = aws_iam_policy.ecr_access.arn
 }
 
-resource "aws_iam_role_policy_attachment" "codeartifact" {
-  role       = aws_iam_role.github_actions_fincorp.name
+resource "aws_iam_user_policy_attachment" "codeartifact" {
+  user       = aws_iam_user.jenkins_fincorp.name
   policy_arn = aws_iam_policy.codeartifact_access.arn
 }
 
-resource "aws_iam_role_policy_attachment" "rds" {
-  role       = aws_iam_role.github_actions_fincorp.name
+resource "aws_iam_user_policy_attachment" "rds" {
+  user       = aws_iam_user.jenkins_fincorp.name
   policy_arn = aws_iam_policy.rds_access.arn
 }
 
