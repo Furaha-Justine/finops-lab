@@ -51,7 +51,7 @@ pipeline {
         stage('Build Docker image') {
             steps {
                 dir('fincorp-app') {
-                    sh 'docker build -t "$ECR_REPOSITORY:$IMAGE_TAG" .'
+                    sh 'docker build --provenance=false --sbom=false -t "$ECR_REPOSITORY:$IMAGE_TAG" .'
                 }
             }
         }
