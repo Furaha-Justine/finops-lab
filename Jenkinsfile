@@ -68,6 +68,7 @@ pipeline {
                       --severity HIGH,CRITICAL \
                       --ignore-unfixed \
                       --exit-code 1 \
+                      --timeout 15m \
                       "$ECR_REPOSITORY:$IMAGE_TAG"
                 '''
             }
