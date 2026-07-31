@@ -103,10 +103,23 @@ pipeline {
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
                     sh '''
-                        aws ecr wait image-scan-complete \
-                          --repository-name "$ECR_REPOSITORY" \
-                          --image-id imageTag=$IMAGE_TAG \
-                          --region "$AWS_REGION" || true
+                        # aws ecr wait image-scan-complete gives up on
+                        # ScanNotFoundException instead of treating "scan
+                        # hasn't started yet" as retryable, and ECR can take
+                        # several minutes to even begin scanning under load.
+                        # Poll manually with a generous timeout instead.
+                        for i in $(seq 1 60); do
+                          STATUS=$(aws ecr describe-image-scan-findings \
+                            --repository-name "$ECR_REPOSITORY" \
+                            --image-id imageTag=$IMAGE_TAG \
+                            --region "$AWS_REGION" \
+                            --query 'imageScanStatus.status' --output text 2>/dev/null || echo "PENDING")
+                          echo "scan status check $i: $STATUS"
+                          if [ "$STATUS" = "COMPLETE" ] || [ "$STATUS" = "FAILED" ]; then
+                            break
+                          fi
+                          sleep 15
+                        done
                         aws ecr describe-image-scan-findings \
                           --repository-name "$ECR_REPOSITORY" \
                           --image-id imageTag=$IMAGE_TAG \
